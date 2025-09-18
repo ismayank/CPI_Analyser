@@ -1,0 +1,30 @@
+services:
+  python_service:
+    build:
+      context: ./python_service
+    container_name: json-change-python
+    env_file:
+      - ./python_service/.env
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: json-change-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - python_service
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: json-change-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
