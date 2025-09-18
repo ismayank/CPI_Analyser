@@ -67,7 +67,7 @@ def generate():
         report = data.get("report")
         git_url = data.get("git_url")
         template_text = data.get("template")  # raw template text (JSON or free text)
-        output_mode = data.get("output", "files")  # 'files' | 'table' | 'multi_tables'
+        output_mode = data.get("output", "files")  # 'files' | 'table' | 'multi_tables' | 'summary'
         changes = data.get("changes")  # flattened changes from backend
 
         input_payload = None
@@ -115,18 +115,62 @@ def generate():
                 for key, arr in tpl.items():
                     if not isinstance(arr, list):
                         continue
-                    columns = ["property", "datatype", "datavalue", "rank"]
+
+                    # First pass: collect language keys present in labels to define stable columns
+                    lang_set = set()
+                    for entry in arr:
+                        mainsnak = (entry or {}).get("mainsnak", {})
+                        dv = mainsnak.get("datavalue", {})
+                        if isinstance(dv, dict):
+                            val = dv.get("value")
+                            if isinstance(val, dict):
+                                labels = val.get("labels")
+                                if isinstance(labels, dict):
+                                    for lang in labels.keys():
+                                        lang_set.add(str(lang))
+                    lang_cols = sorted(list(lang_set))
+
+                    base_cols = ["property", "datatype", "id"]
+                    columns = base_cols + lang_cols + ["rank"]
                     rows = []
                     for entry in arr:
                         mainsnak = (entry or {}).get("mainsnak", {})
                         prop = mainsnak.get("property", "")
                         dtype = mainsnak.get("datatype", "")
                         dv = mainsnak.get("datavalue", {})
-                        # Try to stringify meaningful part of datavalue
-                        dv_text = json.dumps(dv.get("value"), ensure_ascii=False) if isinstance(dv, dict) else json.dumps(dv, ensure_ascii=False)
+                        val = dv.get("value") if isinstance(dv, dict) else None
+                        ent_id = ""
+                        label_map = {}
+                        if isinstance(val, dict):
+                            ent_id = str(val.get("id", ""))
+                            labels = val.get("labels")
+                            if isinstance(labels, dict):
+                                for lang, txt in labels.items():
+                                    label_map[str(lang)] = str(txt)
                         rank = (entry or {}).get("rank", "")
-                        rows.append([str(prop), str(dtype), dv_text if dv_text is not None else "", str(rank)])
+
+                        row = [str(prop), str(dtype), ent_id]
+                        # fill languages in order
+                        for lang in lang_cols:
+                            row.append(label_map.get(lang, ""))
+                        row.append(str(rank))
+                        rows.append(row)
+
+                    # Fallback if no languages/id present: show raw datavalue
+                    if len(columns) == 4 and columns[-1] == "rank" and not any(r[2] for r in rows):
+                        columns = ["property", "datatype", "datavalue", "rank"]
+                        rows = []
+                        for entry in arr:
+                            mainsnak = (entry or {}).get("mainsnak", {})
+                            prop = mainsnak.get("property", "")
+                            dtype = mainsnak.get("datatype", "")
+                            dv = mainsnak.get("datavalue", {})
+                            dv_text = json.dumps(dv.get("value"), ensure_ascii=False) if isinstance(dv, dict) else json.dumps(dv, ensure_ascii=False)
+                            rank = (entry or {}).get("rank", "")
+                            rows.append([str(prop), str(dtype), dv_text if dv_text is not None else "", str(rank)])
+
                     tables.append({"name": key, "columns": columns, "rows": rows})
+
                 result = {
                     "title": input_payload.get("title") or "Template Tables",
                     "description": input_payload.get("description") or "Structured view of template entries by top-level key.",
@@ -159,6 +203,31 @@ def generate():
 
             # If we cannot deterministically format, fall back to LLM table schema
             output_mode = "table"
+
+        if output_mode == "summary":
+            # Ask the model to write a concise business-facing summary only
+            prompt = (
+                "You are a release documentation assistant. Given a set of JSON changes (only newly added or modified values), "
+                "write a concise summary of the impact of these changes for a changelog. Focus on what was added or updated, "
+                "and potential user or system impact. Return STRICT JSON only with this schema (no extra keys, no markdown):\n"
+                "{\n  \"description\": string\n}\n"
+            )
+            resp = client.models.generate_content(
+                model=os.getenv("GENAI_MODEL", "gemini-2.5-flash"),
+                contents=prompt + json.dumps(input_payload)
+            )
+            text = getattr(resp, "text", None)
+            description = ""
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    description = parsed.get("description", "") if isinstance(parsed, dict) else str(parsed)
+                except Exception:
+                    description = text
+            else:
+                description = str(resp)
+
+            return jsonify({"result": {"description": description}}), 200
 
         if output_mode == "table":
             prompt = (

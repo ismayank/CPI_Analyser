@@ -13,6 +13,7 @@ function App() {
   const [error, setError] = useState('');
   const [report, setReport] = useState(null);
   const [templateText, setTemplateText] = useState('');
+  const [templateFile, setTemplateFile] = useState(null);
   const [parsedTemplate, setParsedTemplate] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -29,6 +30,47 @@ function App() {
       setError(e?.response?.data?.error || e.message || 'Failed to analyze repo');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadAIPdf = async () => {
+    if (!aiResult) return;
+    try {
+      const res = await axios.post(`${API_BASE}/api/generatePdf`, { ai: aiResult }, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'ai-documentation.pdf');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      setAiError('Failed to download AI PDF');
+    }
+  };
+
+  const onTemplateFileChange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    setTemplateFile(f || null);
+  };
+
+  const uploadTemplateFile = async () => {
+    if (!templateFile) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiResult(null);
+    try {
+      const form = new FormData();
+      form.append('file', templateFile);
+      const { data } = await axios.post(`${API_BASE}/api/template/upload`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setAiResult(data?.result ?? data);
+    } catch (e) {
+      setAiError(e?.response?.data?.error || e.message || 'File upload failed');
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -274,6 +316,16 @@ function App() {
             <button onClick={parseTemplate} disabled={!templateText}>Parse to JSON</button>
             <button onClick={generateAIFromTemplate} disabled={!templateText || aiLoading}>
               {aiLoading ? 'Formatting…' : 'AI Format to Table'}
+            </button>
+            <label className="upload-label">
+              <input type="file" onChange={onTemplateFileChange} style={{ display: 'none' }} />
+              <span className="btn">Choose File</span>
+            </label>
+            <button onClick={uploadTemplateFile} disabled={!templateFile || aiLoading}>
+              {aiLoading ? 'Uploading…' : 'Upload & Generate Table'}
+            </button>
+            <button onClick={downloadAIPdf} disabled={!aiResult}>
+              Download AI Doc
             </button>
           </div>
         </div>

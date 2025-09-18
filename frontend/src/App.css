@@ -30,18 +30,18 @@ body {
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: #0b1220; /* dark panel */
+  border: 1px solid rgba(148, 163, 184, 0.25); /* slate-400 @ 25% */
+  border-radius: 8px;
   padding: 16px;
-  margin: 18px 0;
-  text-align: left;
+  margin: 12px 0;
+  color: #e5e7eb;
 }
 
 .panel-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 10px;
 }
 
